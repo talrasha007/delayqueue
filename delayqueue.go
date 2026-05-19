@@ -20,13 +20,14 @@ const (
 type Task func()
 
 type delayedQueue struct {
-	mu     sync.Mutex
-	cond   *sync.Cond
-	queue  taskHeap
-	cap    int
-	policy OverflowPolicy
-	wake   chan struct{}
-	seq    atomic.Uint64
+	mu       sync.Mutex
+	notEmpty *sync.Cond
+	notFull  *sync.Cond
+	queue    taskHeap
+	cap      int
+	policy   OverflowPolicy
+	wake     chan struct{}
+	seq      atomic.Uint64
 }
 
 type scheduledTask struct {
@@ -67,7 +68,8 @@ func New(cap int, policy OverflowPolicy) *delayedQueue {
 		policy: policy,
 		wake:   make(chan struct{}, 1),
 	}
-	q.cond = sync.NewCond(&q.mu)
+	q.notFull = sync.NewCond(&q.mu)
+	q.notEmpty = sync.NewCond(&q.mu)
 	heap.Init(&q.queue)
 	go q.loop()
 	return q
@@ -86,7 +88,7 @@ func (q *delayedQueue) Add(d time.Duration, task Task) error {
 		q.mu.Lock()
 		defer q.mu.Unlock()
 		for len(q.queue) >= q.cap {
-			q.cond.Wait()
+			q.notFull.Wait()
 		}
 
 		q.push(st)
@@ -114,7 +116,7 @@ func (q *delayedQueue) Size() int {
 func (q *delayedQueue) push(st scheduledTask) {
 	shouldWake := len(q.queue) == 0 || st.at.Before(q.queue[0].at)
 	heap.Push(&q.queue, st)
-	q.cond.Signal()
+	q.notEmpty.Signal()
 	if shouldWake {
 		q.notifyWake()
 	}
@@ -131,7 +133,7 @@ func (q *delayedQueue) loop() {
 	for {
 		q.mu.Lock()
 		for len(q.queue) == 0 {
-			q.cond.Wait()
+			q.notEmpty.Wait()
 		}
 
 		wait := time.Until(q.queue[0].at)
@@ -152,7 +154,7 @@ func (q *delayedQueue) loop() {
 		}
 
 		st := heap.Pop(&q.queue).(scheduledTask)
-		q.cond.Signal() // notify producers if blocked
+		q.notFull.Signal() // notify producers if blocked
 		q.mu.Unlock()
 
 		go st.task()
