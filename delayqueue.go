@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +26,7 @@ type delayedQueue struct {
 	cap    int
 	policy OverflowPolicy
 	wake   chan struct{}
-	seq    uint64
+	seq    atomic.Uint64
 }
 
 type scheduledTask struct {
@@ -76,9 +77,8 @@ func (q *delayedQueue) Add(d time.Duration, task Task) error {
 	st := scheduledTask{
 		at:   time.Now().Add(d),
 		task: task,
-		seq:  q.seq,
+		seq:  q.seq.Add(1),
 	}
-	q.seq++
 
 	// 满载策略
 	switch q.policy {
