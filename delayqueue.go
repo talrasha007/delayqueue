@@ -83,12 +83,12 @@ func (q *delayedQueue) Add(d time.Duration, task Task) error {
 	// 满载策略
 	switch q.policy {
 	case BlockOverflow:
-		for q.Size() >= q.cap {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		for len(q.queue) >= q.cap {
 			q.cond.Wait()
 		}
 
-		q.mu.Lock()
-		defer q.mu.Unlock()
 		q.push(st)
 		return nil
 
