@@ -73,9 +73,6 @@ func New(cap int, policy OverflowPolicy) *delayedQueue {
 }
 
 func (q *delayedQueue) Add(d time.Duration, task Task) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
 	st := scheduledTask{
 		at:   time.Now().Add(d),
 		task: task,
@@ -83,30 +80,35 @@ func (q *delayedQueue) Add(d time.Duration, task Task) error {
 	}
 	q.seq++
 
-	// 队列未满
-	if len(q.queue) < q.cap {
-		q.push(st)
-		return nil
-	}
-
 	// 满载策略
 	switch q.policy {
 	case BlockOverflow:
-		for len(q.queue) >= q.cap {
+		for q.Size() >= q.cap {
 			q.cond.Wait()
 		}
+
+		q.mu.Lock()
+		defer q.mu.Unlock()
 		q.push(st)
 		return nil
 
 	case DropOldest:
-		// 删除最早未执行
-		heap.Pop(&q.queue)
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		for len(q.queue) >= q.cap {
+			heap.Pop(&q.queue)
+		}
 		q.push(st)
-		q.notifyWake()
 		return nil
 	}
 
 	return ErrQueueFull
+}
+
+func (q *delayedQueue) Size() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.queue)
 }
 
 func (q *delayedQueue) push(st scheduledTask) {
