@@ -15,6 +15,7 @@ type OverflowPolicy int
 const (
 	BlockOverflow OverflowPolicy = iota
 	DropOldest
+	Drop
 )
 
 type Task func()
@@ -101,6 +102,16 @@ func (q *delayedQueue) Add(d time.Duration, task Task) error {
 			heap.Pop(&q.queue)
 		}
 		q.push(st)
+		return nil
+
+	case Drop:
+		q.mu.Lock()
+		defer q.mu.Unlock()
+
+		if len(q.queue) < q.cap {
+			q.push(st)
+		}
+
 		return nil
 	}
 
